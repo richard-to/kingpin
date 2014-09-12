@@ -1,4 +1,5 @@
 (function() {
+
     // Source: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/isArray
     if (!Array.isArray) {
         Array.isArray = function(arg) {
@@ -39,23 +40,90 @@
     };
 
     var _buildRouteName = function(route) {
+        if (route === '/') {
+            return 'index';
+        }
+
         var routeParts = route.split(_delim);
-        var route = '';
+        var routeName = '';
         for (var i = 0; i < routeParts.length; ++i) {
             if (routeParts[i] !== '' && routeParts[i][0] !== _tokenPrefix) {
-                route += '_' + routeParts[i];
+                routeName += '_' + routeParts[i];
             }
         }
-        return route.substring(1);
+        return routeName.substring(1);
     };
 
 
-    var Kingpin = function(routes) {
-        this.baseURL = location.protocol + "//" + location.hostname;
-        if (location.port !== 80 && location.port !== 443) {
-            this.baseURL += ":" + location.port;
+    var _self = this;
+
+    var _baseURL = location.protocol + "//" + location.hostname;
+    if (location.port !== 80 && location.port !== 443) {
+        _baseURL += ":" + location.port;
+    }
+
+    var _routerList = [];
+    var _routerTable = {};
+
+    var _setRoute = function(pathname) {
+        for (var i = 0; i < _routerList.length; ++i) {;
+            if (pathname.indexOf(_routerList[i]) !== 0) {
+                continue;
+            }
+            if (_routerTable[_routerList[i]](pathname)) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    var _onLinkClick = function(e) {
+        var node = e.target;
+        while (node.tagName !== 'A' && node.parentNode)  {
+            node = node.parentNode;
         }
 
+        if (!node) {
+            return;
+        }
+
+        if (node.tagName !== 'A') {
+            return;
+        }
+
+        if (node.href.indexOf(_baseURL) !== 0) {
+            return;
+        }
+
+        if (_setRoute(node.href.substring(_baseURL.length))) {
+            e.preventDefault();
+        }
+    };
+
+    var _onPopState = function(e) {
+        _setRoute(location.pathname);
+    };
+
+    var _addToRouterTable = function(basepath, method) {
+        if (_routerTable[basepath] !== undefined) {
+            throw new Error("Basepath already exists in router table.");
+        }
+        _routerList.push(basepath);
+        _routerTable[basepath] = method;
+    };
+
+    if (history.pushState) {
+        document.body.addEventListener('click', _onLinkClick.bind(_self));
+        window.addEventListener("popstate", _onPopState.bind(_self));
+    }
+
+
+    var Kingpin = function(basepath, routes) {
+        if (typeof basepath !== 'string' || basepath[0] !== '/') {
+            throw new Error("Basepath must start with forward slash.");
+        }
+
+        this.basepath = basepath;
         this.routes = [];
         this.regexRoutes = {};
         this.actions = {};
@@ -63,54 +131,39 @@
         this.urlFor = {};
         this.route = {};
 
-        if (routes) {
-            if (Array.isArray(routes)) {
-                for (var i = 0; i < routes.length; ++i) {
-                    this.on(routes[i][0], routes[i][1], routes[i][2]);
-                }
-            } else {
-                this.on(routes[0], routes[1], routes[2]);
+        if (routes && Array.isArray(routes)) {
+            for (var i = 0; i < routes.length; ++i) {
+                this.on(routes[i][0], routes[i][1], routes[i][2]);
             }
-        }
-    };
-
-    Kingpin.prototype._onPopState = function(e) {
-        this.setRoute(location.pathname);
-    };
-
-    Kingpin.prototype._onLinkClick = function(e) {
-        var node = e.target;
-        while (node.tagName !== 'A' && node.parentNode)  {
-            node = node.parentNode;
+        } else if (routes) {
+            this.on(routes[0], routes[1], routes[2]);
         }
 
-        if (node && node.tagName === 'A' && node.href.indexOf(this.baseURL) === 0) {
-            if (this.setRoute(node.href.substring(this.baseURL.length))) {
-                e.preventDefault();
-            }
-        }
+        _addToRouterTable(this.basepath, this.setRoute.bind(this));
     };
 
     Kingpin.prototype.on = function(route, action, scope) {
         var self = this;
         var routeName = _buildRouteName(route);
-
-        if (this.route[routeName]) {
+        if (this.urlFor[routeName]) {
             return;
         }
+        var fullRoute = this.basepath + route;
 
         this.routes.push(routeName);
         this.route[routeName.toUpperCase()] = route;
         this.urlFor[routeName] = function() {
-            return _urlFor(route, arguments);
+            return _urlFor(fullRoute, arguments);
         };
         this.actions[routeName] = action;
         this.go[routeName] = function() {
             action.apply(scope, arguments);
-            history.pushState(null, null, self.urlFor[routeName].apply(self, arguments));
+            if (history.pushState) {
+                history.pushState(null, null, self.urlFor[routeName].apply(self, arguments));
+            }
         };
         this.actions[routeName] = action;
-        this.regexRoutes[routeName] = new RegExp(_toRegexRoute(route));
+        this.regexRoutes[routeName] = new RegExp(_toRegexRoute(fullRoute));
 
         return this;
     };
@@ -127,28 +180,6 @@
             }
         }
         return false;
-    };
-
-    Kingpin.prototype.startListening = function() {
-        if (document.body.addEventListener) {
-            document.body.addEventListener('click', this._onLinkClick.bind(this));
-        }
-
-        if (history.pushState) {
-            window.addEventListener("popstate", this._onPopState.bind(this));
-        }
-        return this;
-    };
-
-    Kingpin.prototype.stopListening = function() {
-        if (document.body.addEventListener) {
-            document.body.removeEventListener('click', this._onLinkClick.bind(this));
-        }
-
-        if (history.pushState) {
-            window.removeEventListener("popstate", this._onPopState.bind(this));
-        }
-        return this;
     };
 
     window.Kingpin = Kingpin;
